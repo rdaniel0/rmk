@@ -32,7 +32,7 @@ env:
   RUST_TOOLCHAIN: "1.96.0"
 jobs:
   get_chip_name:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       chip_name: ${{ steps.capture.outputs.chip_name }}
       project_name: ${{ steps.project.outputs.project_name }}
@@ -71,7 +71,7 @@ jobs:
           fi
           echo "prefix=$PREFIX" >> "$GITHUB_OUTPUT"
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: get_chip_name
     steps:
       - uses: actions/checkout@v6
