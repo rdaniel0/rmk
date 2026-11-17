@@ -1,0 +1,69 @@
+# A layer key pressed while a morse key is undecided must switch layers at once,
+# so the key pressed next resolves on the new layer, while the morse key stays
+# pending and resolves by its own mode.
+#
+# Fixture: MT(B, LShift)@(1,1), A@(1,0) (layer 1: Kp1), MO(1)@(3,0).
+
+keyboard = "boards/split.toml"
+
+[behavior.morse]
+enable_flow_tap = false
+unilateral_tap = false
+permissive_hold = true
+
+[[test]]
+name = "key_after_layer_resolves_on_new_layer"
+steps = [
+  { press = [1, 1] },    # Press MT(B, LShift), undecided
+  { press = [3, 0] },    # Press MO(1), layer 1 on
+  { press = [1, 0] },    # Press layer 1 Kp1
+  { release = [1, 0] },  # Nested release resolves MT as hold
+  { release = [3, 0] },
+  { release = [1, 1] },
+]
+expect = [["LShift"], ["LShift", "Kp1"], ["LShift"], []]
+
+[[test]]
+name = "layer_tap_leaves_morse_key_pending"
+steps = [
+  { press = [1, 1] },    # Press MT(B, LShift), undecided
+  { press = [3, 0] },    # Press MO(1)
+  { release = [3, 0] },  # Releasing the layer key is not a nested tap
+  { release = [1, 1] },  # Released unresolved -> tap
+]
+expect = [["B"], []]
+
+[[test]]
+name = "roll_through_layer_key_is_tap"
+steps = [
+  { press = [1, 1] },    # Press MT(B, LShift), undecided
+  { press = [3, 0] },    # Press MO(1)
+  { press = [1, 0] },    # Press layer 1 Kp1
+  { release = [1, 1] },  # MT released first -> tap
+  { release = [1, 0] },
+  { release = [3, 0] },
+]
+expect = [["B"], ["B", "Kp1"], ["Kp1"], []]
+
+[[test]]
+name = "layer_released_before_key"
+steps = [
+  { press = [1, 1] },    # Press MT(B, LShift), undecided
+  { press = [3, 0] },    # Press MO(1), layer 1 on
+  { press = [1, 0] },    # Press layer 1 Kp1, buffered
+  { release = [3, 0] },  # Layer 1 off before the buffered key resolves
+  { release = [1, 0] },  # Nested release resolves MT as hold; Kp1 keeps its press-time layer
+  { release = [1, 1] },
+]
+expect = [["LShift"], ["LShift", "Kp1"], ["LShift"], []]
+
+[[test]]
+name = "normal_mode_morse_key_reevaluated_after_layer_key"
+behavior.morse = { normal_mode = true, permissive_hold = false }
+steps = [
+  { press = [1, 1] },    # Press MT(B, LShift), undecided
+  { press = [3, 0] },    # Press MO(1), layer 1 on
+  { release = [1, 1] },  # Released unresolved on layer 1
+  { release = [3, 0] },
+]
+expect = [["Kp2"], []]

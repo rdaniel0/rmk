@@ -276,6 +276,17 @@ impl KeyMapInner<'_> {
         }
     }
 
+    fn peek_layer_cache(&self, pos: KeyboardEventPos) -> u8 {
+        if let KeyboardEventPos::Key(key_pos) = pos
+            && let Some(cache) = self
+                .layer_cache
+                .get(self.cache_index(key_pos.row as usize, key_pos.col as usize))
+        {
+            return *cache;
+        }
+        self.behavior.default_layer
+    }
+
     fn save_layer_cache(&mut self, pos: KeyboardEventPos, layer_num: u8) {
         match pos {
             KeyboardEventPos::Key(key_pos) => {
@@ -447,6 +458,14 @@ impl<'a> KeyMap<'a> {
 
     pub(crate) fn get_action_with_layer_cache(&self, event: KeyboardEvent) -> KeyAction {
         self.inner.borrow_mut().get_action_with_layer_cache(event)
+    }
+
+    pub(crate) fn peek_layer_cache(&self, pos: KeyboardEventPos) -> u8 {
+        self.inner.borrow().peek_layer_cache(pos)
+    }
+
+    pub(crate) fn restore_layer_cache(&self, pos: KeyboardEventPos, layer_num: u8) {
+        self.inner.borrow_mut().save_layer_cache(pos, layer_num);
     }
 
     pub(crate) fn get_action_at(&self, pos: KeyboardEventPos, layer: usize) -> KeyAction {

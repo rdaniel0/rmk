@@ -204,6 +204,8 @@ pub struct Keyboard<'a> {
 
     /// Buffered held keys
     pub held_buffer: HeldBuffer,
+    /// Layer keys that bypassed the held buffer and are still down
+    bypassed_layer_keys: Vec<KeyboardEventPos, 4>,
 
     /// Record the timestamp of last **simple key** press.
     /// It's used in tap-hold prior-idle-time check.
@@ -288,6 +290,7 @@ impl<'a> Keyboard<'a> {
             fork_keep_mask: ModifierCombination::default(),
             unprocessed_events: Vec::new(),
             held_buffer: HeldBuffer::new(),
+            bypassed_layer_keys: Vec::new(),
             registered_keys: [None; 6],
             held_modifiers: ModifierCombination::default(),
             held_keycodes: [HidKeyCode::No; 6],
@@ -439,16 +442,36 @@ impl<'a> Keyboard<'a> {
                 } else {
                     event_time
                 };
-                self.held_buffer.push(HeldKey::new(
+                let mut held_key = HeldKey::new(
                     event,
                     *key_action,
                     KeyState::Pressed(MorsePattern::default()),
                     event_time,
                     timeout_time,
-                ));
+                );
+                if !self.bypassed_layer_keys.is_empty() {
+                    held_key.pinned_layer = Some(self.keymap.peek_layer_cache(event.pos));
+                }
+                self.held_buffer.push(held_key);
             }
             KeyBehaviorDecision::Ignore => {
                 debug!("Current key is ignored or not buffered, process normally: {:?}", event);
+                if Self::is_momentary_layer(key_action) {
+                    if event.pressed {
+                        let permissive_pending = self.held_buffer.keys.iter().any(|k| {
+                            k.action.is_morse()
+                                && Self::tap_hold_mode(self.keymap, &k.action) == MorseMode::PermissiveHold
+                        });
+                        if permissive_pending {
+                            for held_key in self.held_buffer.keys.iter_mut() {
+                                held_key.pinned_layer = Some(self.keymap.peek_layer_cache(held_key.event.pos));
+                            }
+                            let _ = self.bypassed_layer_keys.push(event.pos);
+                        }
+                    } else {
+                        self.bypassed_layer_keys.retain(|pos| *pos != event.pos);
+                    }
+                }
                 // Process current key normally
                 let key_action = if keyboard_state_updated && !is_combo {
                     // The key_action needs to be updated due to the morse key might be triggered
@@ -544,7 +567,7 @@ impl<'a> Keyboard<'a> {
                 }
                 HeldKeyDecision::PermissiveHold | HeldKeyDecision::HoldOnOtherKeyPress => {
                     if let Some(mut held_key) = self.held_buffer.remove_if(|k| k.event.pos == pos) {
-                        let action = self.keymap.get_action_with_layer_cache(held_key.event);
+                        let action = self.held_key_action(&held_key);
 
                         if action.is_morse() {
                             // Permissive hold of held key is triggered
@@ -587,7 +610,7 @@ impl<'a> Keyboard<'a> {
                         // Always re-evaluate action based on current layer state.
                         // A prior layer change (e.g. permissive hold activating a layer)
                         // may have changed what action this key maps to.
-                        let key_action = self.keymap.get_action_with_layer_cache(held_key.event);
+                        let key_action = self.held_key_action(&held_key);
                         if key_action != held_key.action {
                             keyboard_state_updated = true;
                         }
@@ -657,7 +680,7 @@ impl<'a> Keyboard<'a> {
                     if trigger_normal && let Some(held_key) = self.held_buffer.remove_if(|k| k.event.pos == pos) {
                         debug!("Cleaning buffered normal key");
                         let action = if keyboard_state_updated {
-                            self.keymap.get_action_with_layer_cache(held_key.event)
+                            self.held_key_action(&held_key)
                         } else {
                             held_key.action
                         };
@@ -756,7 +779,10 @@ impl<'a> Keyboard<'a> {
                         match mode {
                             MorseMode::PermissiveHold => {
                                 // Permissive hold mode checks key releases, so push current key press into buffer.
-                                decision_for_current_key = KeyBehaviorDecision::Buffer;
+                                // Layer keys apply at once so the next key resolves on the new layer.
+                                if !Self::is_momentary_layer(key_action) {
+                                    decision_for_current_key = KeyBehaviorDecision::Buffer;
+                                }
                             }
                             MorseMode::HoldOnOtherPress => {
                                 debug!(
@@ -812,7 +838,9 @@ impl<'a> Keyboard<'a> {
                         }
 
                         // The current key is being released, check only the held key in permissive hold mode
-                        if decision_for_current_key != KeyBehaviorDecision::Release && mode == MorseMode::PermissiveHold
+                        if decision_for_current_key != KeyBehaviorDecision::Release
+                            && mode == MorseMode::PermissiveHold
+                            && !Self::is_momentary_layer(key_action)
                         {
                             debug!("Permissive hold!");
                             // Check first current releasing key is in the buffer, AND after the current key
@@ -824,6 +852,22 @@ impl<'a> Keyboard<'a> {
             }
         }
         (decision_for_current_key, decisions)
+    }
+
+    /// Keys pressed before a layer key bypassed the buffer keep their press-time action;
+    /// keys pressed after it are re-evaluated on the current layers.
+    fn held_key_action(&self, held_key: &HeldKey) -> KeyAction {
+        match held_key.pinned_layer {
+            Some(layer) => {
+                self.keymap.restore_layer_cache(held_key.event.pos, layer);
+                held_key.action
+            }
+            None => self.keymap.get_action_with_layer_cache(held_key.event),
+        }
+    }
+
+    fn is_momentary_layer(key_action: &KeyAction) -> bool {
+        matches!(key_action, KeyAction::Single(Action::LayerOn(_)))
     }
 
     async fn process_key_action_inner(

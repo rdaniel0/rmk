@@ -133,6 +133,9 @@ pub struct HeldKey {
     pub press_time: Instant,
     /// The timeout time for the key
     pub timeout_time: Instant,
+    /// Layer the key was pressed on, set while a layer key that bypassed the buffer is
+    /// down, so the key resolves there instead of being re-evaluated on the current layers.
+    pub pinned_layer: Option<u8>,
 }
 
 impl HeldKey {
@@ -149,6 +152,7 @@ impl HeldKey {
             state,
             press_time,
             timeout_time,
+            pinned_layer: None,
         }
     }
 }

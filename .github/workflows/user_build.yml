@@ -17,6 +17,16 @@ on:
         default: "main"
         required: false
         type: string
+      rmk_git_url:
+        description: "Optional git URL to build rmk from instead of crates.io (needs rmk_git_branch)"
+        default: ""
+        required: false
+        type: string
+      rmk_git_branch:
+        description: "Branch of rmk_git_url to build rmk from"
+        default: ""
+        required: false
+        type: string
 env:
   RUST_MIN_STACK: "67108864"
   RUST_TOOLCHAIN: "1.96.0"
@@ -94,6 +104,25 @@ jobs:
         run: espup install
       - name: Create firmware project
         run: rmkit create --keyboard-toml-path "${{ inputs.keyboard_toml_path }}" --vial-json-path "${{ inputs.vial_json_path }}" --version "${{ inputs.rmk_version }}" --target-dir rmk
+      - name: Patch rmk crates to git branch
+        if: ${{ inputs.rmk_git_url != '' && inputs.rmk_git_branch != '' }}
+        working-directory: ./rmk
+        env:
+          RMK_GIT_URL: ${{ inputs.rmk_git_url }}
+          RMK_GIT_BRANCH: ${{ inputs.rmk_git_branch }}
+        run: |
+          if grep -q '^\[patch\.crates-io\]' Cargo.toml; then
+            echo "Cargo.toml already has [patch.crates-io]; merge manually" >&2
+            exit 1
+          fi
+          {
+            echo
+            echo "[patch.crates-io]"
+            for crate in rmk rmk-types rmk-macro rmk-config; do
+              echo "$crate = { git = \"$RMK_GIT_URL\", branch = \"$RMK_GIT_BRANCH\" }"
+            done
+          } >> Cargo.toml
+          tail -6 Cargo.toml
       - name: Pin generated Rust toolchain
         if: ${{ needs.get_chip_name.outputs.chip_name != 'esp32s3' }}
         working-directory: ./rmk
